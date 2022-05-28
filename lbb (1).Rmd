@@ -1,0 +1,303 @@
+---
+title: "LBB"
+
+output: html_notebook
+---
+
+Inspiration
+The data-set aims to answer the following key questions:
+
+1. Does various predicting factors which has been chosen initially really affect the Life expectancy? What are the predicting variables actually affecting the life expectancy?
+2. Should a country having a lower life expectancy value(<65) increase its healthcare expenditure in order to improve its average lifespan?
+3. Does Life Expectancy has positive or negative correlation with eating habits, lifestyle, exercise, smoking, drinking alcohol etc.
+4. Do densely populated countries tend to have lower life expectancy?
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(GGally)
+library(tidyr)
+library(MLmetrics)
+library(car)
+```
+
+```{r}
+options(scipen = 999)
+```
+
+
+```{r}
+life <- read.csv("Life Expectancy Data.csv")
+```
+```{r}
+life <- life %>% 
+  drop_na() %>% 
+  mutate(Country = as.factor(Country),
+         Status = as.factor(Status),
+         Year = as.factor(Year))
+```
+
+```{r}
+str(life)
+```
+
+```{r}
+colSums(is.na(life))
+```
+```{r}
+life_low <- life %>% 
+  filter(Life.expectancy < 65) %>% 
+  select(c("Life.expectancy","Total.expenditure"))
+```
+```{r}
+model_low <- lm(formula = Life.expectancy~Total.expenditure, data = life_low)
+summary(model_low)
+```
+
+```{r}
+plot(life_low)
+abline(model_low)
+```
+```{r}
+cor(life_low)
+```
+> negative correlation, so there is no need to increase expenditure
+
+```{r}
+life_exp <- life %>% 
+  select(-c("Country","Year","Status"))
+```
+
+
+```{r}
+str(life_exp)
+```
+```{r}
+sapply(life, n_distinct)
+```
+
+
+```{r warning=FALSE}
+ggplot(data=life,mapping=aes(Year,Life.expectancy,color=Status))+
+  geom_point()+
+  scale_color_brewer(palette="Accent")+
+  geom_smooth(method="lm",se=FALSE)+
+  labs(title="Life Expectancy from 2000-2015")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+```{r}
+ggplot(data=life,mapping=aes(Year,Adult.Mortality,color=Status))+
+  geom_point()+
+  scale_color_brewer(palette="Accent")+
+  geom_smooth(method="lm",se=FALSE)+
+  labs(title="Adult Mortality from 2000-2015")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+```{r}
+ggcorr(life_exp, label = TRUE, label_size = 3, hjust = 1, size = 3, color = "grey50")
+```
+>> Kesimpulan :
+Schooling , Income Composition of Resources, Adult.Mortality, HIV.AIDS, BMI
+
+
+```{r}
+model_all <- lm(formula = Life.expectancy~., data = life_exp)
+summary(model_all)
+```
+```{r}
+vif(model_all)
+```
+```{r}
+life_exp <- life_exp %>% 
+  select(-c("percentage.expenditure","under.five.deaths"))
+```
+
+```{r}
+set.seed(123)
+samplesize <- round(0.7 * nrow(life_exp), 0)
+index <- sample(seq_len(nrow(life_exp)), size = samplesize)
+
+data_train <- life_exp[index, ]
+data_test <- life_exp[-index, ]
+```
+
+```{r}
+model_all1 <- lm(formula = Life.expectancy~., data = data_train)
+summary(model_all1)
+```
+```{r}
+vif(model_all1)
+
+```
+
+```{r}
+model_cor <-  lm(formula = Life.expectancy~Schooling + Income.composition.of.resources + HIV.AIDS + BMI + Adult.Mortality, data = data_train)
+summary(model_cor)
+```
+```{r}
+model_dis <- lm(formula = Life.expectancy~ Alcohol + Hepatitis.B + Measles + 
+    Polio + Diphtheria + HIV.AIDS , data = data_train)
+summary(model_dis)
+```
+
+```{r}
+summary(model_all)$adj.r.squared
+summary(model_cor)$adj.r.squared
+summary(model_dis)$adj.r.squared
+```
+> Kesimpulan: Pada kasus ini, model dengan seluruh kolom sebagai prediktor adalah model terbaik
+
+```{r}
+data_train$Prediksi <- predict(model_all1, newdata = data_train %>% select(-Life.expectancy))
+```
+
+```{r}
+res_train <- data_train$Prediksi - data_train$Life.expectancy
+data.frame(prediksi = data_train$Prediksi,
+           actual = data_train$Life.expectancy,
+           residual = res_train)
+```
+
+```{r}
+RMSE(model_all1$fitted.values, data_train$Life.expectancy)
+```
+```{r}
+MAPE(data_train$Prediksi, data_train$Life.expectancy) * 100
+```
+
+
+```{r}
+data_test$Prediksi <- predict(model_all1, newdata = data_test %>% select(-Life.expectancy))
+```
+
+```{r}
+res_test <- data_test$Prediksi - data_test$Life.expectancy
+w <- data.frame(prediksi = data_test$Prediksi,
+           actual = data_test$Life.expectancy,
+           residual = res_test)
+```
+
+```{r warning=FALSE}
+RMSE(model_all1$fitted.values, data_test$Life.expectancy)
+```
+
+```{r}
+MAPE(data_test$Prediksi, data_test$Life.expectancy) * 100
+```
+```{r}
+set.seed(123)
+samplesize <- round(0.7 * nrow(life_exp), 0)
+index <- sample(seq_len(nrow(life_exp)), size = samplesize)
+
+data_train1 <- life_exp[index, ]
+data_test1 <- life_exp[-index, ]
+```
+
+```{r}
+# model tanpa prediktor
+model_life_non <- lm(formula = Life.expectancy ~ 1, data = data_train1)
+# model dengan semua prediktor
+model_life_all <- lm(formula = Life.expectancy ~ ., data = data_train1)
+```
+
+```{r}
+both_model <- step(model_life_non, direction = "both",
+     scope = list(lower = model_life_non, upper = model_life_all), trace = 0)
+
+summary(both_model)
+```
+
+```{r}
+# Backward elimination
+backward_model <- step(model_life_all, trace = 0)
+summary(backward_model)
+```
+
+```{r}
+
+forward_model <- step(model_life_non, direction = "forward",
+     scope = list(lower = model_life_non, upper = model_life_all), trace = 0)
+summary(forward_model)
+```
+
+```{r}
+library(performance)
+compare_performance(backward_model, forward_model, both_model)
+```
+> all model is the same
+
+```{r}
+data_train1$Prediksi <- predict(both_model, newdata = data_train1 %>% select(-Life.expectancy))
+```
+
+```{r}
+res_train1 <- data_train1$Prediksi - data_train1$Life.expectancy
+data.frame(prediksi = data_train1$Prediksi,
+           actual = data_train1$Life.expectancy,
+           residual = res_train1)
+```
+
+```{r}
+RMSE(both_model$fitted.values, data_train1$Life.expectancy)
+```
+```{r}
+MAPE(data_train1$Prediksi, data_train1$Life.expectancy) * 100
+```
+```{r}
+data_test1$Prediksi <- predict(both_model, newdata = data_test1 %>% select(-Life.expectancy))
+```
+
+```{r}
+res_test1 <- data_test1$Prediksi - data_test1$Life.expectancy
+h <- data.frame(prediksi = data_test1$Prediksi,
+           actual = data_test1$Life.expectancy,
+           residual = res_test1)
+```
+
+```{r warning=FALSE}
+RMSE(both_model$fitted.values, data_test1$Life.expectancy)
+```
+
+```{r}
+MAPE(data_test1$Prediksi, data_test1$Life.expectancy) * 100
+```
+
+```{r}
+hist(h$residual, breaks=30)
+```
+>normal distribution
+
+H0: error berdistribusi normal
+H1: error tidak berdistribusi normal
+(harapannya pvalue > alpha agar keputusan yang diambil adalah gagal tolak H0)
+
+```{r}
+shapiro.test(h$residual)
+```
+> p value < 0.005
+> tolak H0
+
+```{r warning=FALSE}
+library(lmtest)
+plot(data_test1$Life.expectancy, h$residual)
+abline(h = 0, col = "red")
+```
+$$
+H_0: Variansi\ error\ menyebar\ konstan\ (Homoscedasticity)\\
+H_1: Variansi\ error\ menyebar\ tidak\ konstan\ membentuk\ pola\ (Heteroscedasticity)
+$$
+Breusch-Pagan hypothesis test: (harapannya p-value > alpha agar gagal tolak H0)
+
+```{r}
+bptest(both_model)
+```
+```{r}
+vif(both_model)
+```
+
+
+
+
+
+
+

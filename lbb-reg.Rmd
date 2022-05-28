@@ -1,0 +1,353 @@
+---
+title: "Life Expectancy Regression Model"
+author: "Wennie"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  rmdformats::downcute:
+  highlight: tango
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Introduction
+
+This data-set contain factors affecting life expectancy with the consideration of demographic variables, income composition, mortality rates, economic factors, immunization affect by formulating a regression model.
+
+The data-set aims to answer the following key questions:
+
+1. Does various predicting factors which has been chosen initially really affect the Life expectancy? What are the predicting variables actually affecting the life expectancy?
+2. Should a country having a lower life expectancy value(<65) increase its healthcare expenditure in order to improve its average lifespan?
+3. Does Life Expectancy has positive or negative correlation with eating habits, lifestyle, exercise, smoking, drinking alcohol etc.
+4. Do densely populated countries tend to have lower life expectancy?
+
+The data can be found in : `https://www.kaggle.com/datasets/kumarajarshi/life-expectancy-who`
+
+## Data Preparation & EDA
+
+```{r warning=FALSE,message=FALSE}
+library(dplyr)
+library(ggplot2)
+library(GGally)
+library(tidyr)
+library(MLmetrics)
+library(car)
+library(rmarkdown)
+```
+
+```{r}
+options(scipen = 999)
+```
+
+load the data set
+```{r}
+life <- read.csv("Life Expectancy Data.csv")
+paged_table(life)
+```
+
+check the datatypes of each column
+```{r}
+str(life)
+```
+
+check the missing values in the data `life`
+```{r}
+colSums(is.na(life))
+```
+
+There is a lot of missing value in the data, so we can drop the NA. Furthermore, the data is consist of `22 variables`, here our target variable is none other than `life expectancy`. Besides, we will delete the unused columns such as `Country, Status, and Year` and will be assigned to new variable : `life_exp`
+```{r}
+life <- life %>% 
+  drop_na()
+```
+
+```{r}
+life_exp <- life %>% 
+  select(-c("Country","Year","Status"))
+```
+
+## Developed vs Developing Country Life Expectancy
+
+Here, we are going to see the life expectancy rate in Developed and Developing Country from the `Status` columns
+```{r warning=FALSE, message = FALSE}
+ggplot(data=life,mapping=aes(Year,Life.expectancy,color=Status))+
+  geom_point()+
+  scale_color_brewer(palette="Accent")+
+  geom_smooth(method="lm",se=FALSE)+
+  labs(title="Life Expectancy from 2000-2015")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Let's have a look at the adult mortality between both groups
+```{r warning=FALSE, message = FALSE}
+ggplot(data=life,mapping=aes(Year,Adult.Mortality,color=Status))+
+  geom_point()+
+  scale_color_brewer(palette="Accent")+
+  geom_smooth(method="lm",se=FALSE)+
+  labs(title="Adult Mortality from 2000-2015")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+## Modeling
+
+### 1. Life Expectancy and Total Expenditure Correlation
+
+firstly, lets select only two columns : `Life Expectancy` &  `Total Expenditure` as we will only see the correlation between this two variables
+```{r}
+life_low <- life_exp %>% 
+  filter(Life.expectancy < 65) %>% 
+  select(c("Life.expectancy","Total.expenditure"))
+```
+
+then, we will build model with `Life Expectancy` as the `target variable` while `Total Expenditure` as the `predictor variable`
+```{r}
+model_low <- lm(formula = Life.expectancy~Total.expenditure, data = life_low)
+summary(model_low)
+```
+
+From the model summary, we can see that `Total Expenditure` does not depicts the target variable as the `adjusted R-Squared` relatively low. However let's see the plot for better understanding
+```{r}
+plot(life_low)
+```
+
+it is clear that total expenditure does not affect the life span, and negatively corelated
+
+### 2. Choosing best-fit model for target
+
+In the begining, we will build one model with all predictor then we will conduct `Multicollinearity Test` so that we can omit some columns with high correlation one another.
+```{r}
+model_all <- lm(formula = Life.expectancy~., data = life_exp)
+summary(model_all)
+```
+
+```{r}
+vif(model_all)
+```
+We have 2 pair of variables with high value (>10) so we omit one of them
+
+```{r}
+life_exp <- life_exp %>% 
+  select(-c("percentage.expenditure","under.five.deaths"))
+```
+Now, the data is ready to go!
+
+Before we build the model, we need to split the data into train dataset and test dataset. We will use the train dataset to train the linear regression model. The test dataset will be used as a comparasion and see if the model get overfit and can not predict new data that hasn’t been seen during training phase. We will 70% of the data as the training data and the rest of it as the testing data.
+
+```{r}
+set.seed(123)
+samplesize <- round(0.7 * nrow(life_exp), 0)
+index <- sample(seq_len(nrow(life_exp)), size = samplesize)
+
+data_train <- life_exp[index, ]
+data_test <- life_exp[-index, ]
+```
+
+Below, we will use `ggcorr` to get the insight on which variables most correlated to our target variable
+```{r}
+ggcorr(data_train, label = TRUE, label_size = 3, hjust = 1, size = 3, color = "grey50")
+```
+
+Although almost all variables show a high correlation to our target variable, Schooling , Income Composition of Resources, Adult Mortality, HIV AIDS, and BMI has the highest value among all. Let's build the model based on that information!
+
+```{r}
+model_cor <-  lm(formula = Life.expectancy~Schooling + Income.composition.of.resources + HIV.AIDS + BMI + Adult.Mortality, data = data_train)
+summary(model_cor)
+```
+
+Next, let's build another model with all variables as the predictor!
+```{r}
+model_all1 <- lm(formula = Life.expectancy~., data = data_train)
+summary(model_all1)
+```
+
+```{r}
+vif(model_all1)
+```
+This time, no Multicollinearity :D
+
+let's build the third model with diseases as the predictor variable
+```{r}
+model_dis <- lm(formula = Life.expectancy~ Alcohol + Hepatitis.B + Measles + 
+    Polio + Diphtheria + HIV.AIDS , data = data_train)
+summary(model_dis)
+```
+
+Here, we are going to evaluate which model is the best from `adjusted r squared`
+```{r}
+summary(model_all1)$adj.r.squared
+summary(model_cor)$adj.r.squared
+summary(model_dis)$adj.r.squared
+```
+in this case, it is apparent that model_all1 will be our model
+
+Here we go! Linear Regression from the data train!
+```{r}
+data_train$Prediksi <- predict(model_all1, newdata = data_train %>% select(-Life.expectancy))
+```
+
+```{r}
+res_train <- data_train$Prediksi - data_train$Life.expectancy
+j <- data.frame(prediksi = data_train$Prediksi,
+           actual = data_train$Life.expectancy,
+           residual = res_train)
+head(j)
+```
+
+Next, let's apply it in our data test!
+```{r}
+data_test$Prediksi <- predict(model_all1, newdata = data_test %>% select(-Life.expectancy))
+```
+
+```{r}
+res_test <- data_test$Prediksi - data_test$Life.expectancy
+w <- data.frame(prediksi = data_test$Prediksi,
+           actual = data_test$Life.expectancy,
+           residual = res_test)
+head(w)
+```
+
+## Evaluation
+
+### Data Train with all variables as the predictor
+```{r}
+RMSE(model_all1$fitted.values, data_train$Life.expectancy)
+```
+```{r}
+MAPE(data_train$Prediksi, data_train$Life.expectancy) * 100
+```
+
+### Data Test with all variables as the predictor
+```{r}
+RMSE(model_all1$fitted.values, data_test$Life.expectancy)
+```
+
+```{r}
+MAPE(data_test$Prediksi, data_test$Life.expectancy) * 100
+```
+
+Well the RMSE in our data test is not as good in our data train.
+
+## Model Improvement
+
+let's implement `step-wise regression`,but first, do not forget to split the data into train and test with 7:3 ratio!
+```{r}
+set.seed(123)
+samplesize <- round(0.7 * nrow(life_exp), 0)
+index <- sample(seq_len(nrow(life_exp)), size = samplesize)
+
+data_train1 <- life_exp[index, ]
+data_test1 <- life_exp[-index, ]
+```
+
+```{r}
+# model without predictor
+model_life_non <- lm(formula = Life.expectancy ~ 1, data = data_train1)
+# model with all predictor
+model_life_all <- lm(formula = Life.expectancy ~ ., data = data_train1)
+```
+
+```{r}
+both_model <- step(model_life_non, direction = "both",
+     scope = list(lower = model_life_non, upper = model_life_all), trace = 0)
+
+summary(both_model)
+```
+
+```{r}
+# Backward elimination
+backward_model <- step(model_life_all, trace = 0)
+summary(backward_model)
+```
+
+```{r}
+
+forward_model <- step(model_life_non, direction = "forward",
+     scope = list(lower = model_life_non, upper = model_life_all), trace = 0)
+summary(forward_model)
+```
+
+```{r warning=FALSE,message=FALSE}
+library(performance)
+compare_performance(backward_model, forward_model, both_model)
+```
+
+all model perform well, but we will take `both_model` to go to the next stage XD
+```{r}
+data_train1$Prediksi <- predict(both_model, newdata = data_train1 %>% select(-Life.expectancy))
+```
+
+```{r}
+res_train1 <- data_train1$Prediksi - data_train1$Life.expectancy
+k<- data.frame(prediksi = data_train1$Prediksi,
+           actual = data_train1$Life.expectancy,
+           residual = res_train1)
+head(k)
+```
+
+```{r}
+RMSE(both_model$fitted.values, data_train1$Life.expectancy)
+```
+```{r}
+MAPE(data_train1$Prediksi, data_train1$Life.expectancy) * 100
+```
+
+```{r}
+data_test1$Prediksi <- predict(both_model, newdata = data_test1 %>% select(-Life.expectancy))
+```
+
+```{r}
+res_test1 <- data_test1$Prediksi - data_test1$Life.expectancy
+h <- data.frame(prediksi = data_test1$Prediksi,
+           actual = data_test1$Life.expectancy,
+           residual = res_test1)
+```
+
+```{r warning=FALSE}
+RMSE(both_model$fitted.values, data_test1$Life.expectancy)
+```
+
+```{r}
+MAPE(data_test1$Prediksi, data_test1$Life.expectancy) * 100
+```
+
+well, it is still the same with the model_all1 performance :(, but yeah let's move on
+
+```{r}
+hist(h$residual, breaks=30)
+```
+From the graph, we can see that the data is not normaly distributed, let's run `shapiro test` to be more precise!
+
+H0: error is distributed normally
+H1: error is not distributed normally
+
+```{r}
+shapiro.test(h$residual)
+```
+well, p-value < alpha (0.05) so we need to reject H0
+
+```{r warning=FALSE}
+library(lmtest)
+plot(data_test1$Life.expectancy, h$residual)
+abline(h = 0, col = "red")
+```
+
+$$
+H_0: Homoscedasticity\\
+H_1: Heteroscedasticity
+$$
+```{r}
+bptest(both_model)
+```
+The p-value is again lower than the alpha so our data is Heteroscedasticity, means that our error variation is not constantly distributed but performing pattern
+
+```{r}
+vif(both_model)
+```
+no multicollinearity as no value is higher than 10
+
+
+## Conclusion
+Variables that are useful to describe the variances in life expectancy are Schooling , Income Composition of Resources, Adult Mortality, HIV AIDS, and BMI. However, we take all variables as the model. Our final model has satisfied the classical assumptions. The R-squared of the model is high, with 83.29% of the variables can explain the variances in the Life Expectancy. The accuracy of the model in predicting the car price is measured with RMSE and MAPE, with training data has RMSE and MAPE of 3.66 & 4.22% and testing data has RMSE and MAPE of 11.73 & 4.28% respectively , suggesting that our model may overfit the traning dataset.
+
+We have already learn how to build a linear regression model and what need to be concerned when building the model.
